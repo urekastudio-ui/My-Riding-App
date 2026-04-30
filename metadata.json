@@ -1,0 +1,12 @@
+{
+  "name": "My Riding App",
+  "description": "A comprehensive motorcycle companion app featuring GPS speedometer, odometer, trip meter, media control, crash detection with SOS, and maintenance tracking with cloud backup.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "GPS Navigation",
+    "Health and Safety",
+    "Vehicle Tracking"
+  ]
+}

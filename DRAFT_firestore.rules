@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 1. User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(incoming());
+      allow update: if isOwner(userId) && isValidUserProfile(incoming())
+        && (incoming().diff(existing()).affectedKeys().hasOnly(['odometer', 'emergencyContact', 'lastUpdated']));
+
+      function isValidUserProfile(data) {
+        return data.keys().hasAll(['odometer'])
+          && data.odometer is number && data.odometer >= 0
+          && (!data.keys().hasAny(['emergencyContact']) || (
+            data.emergencyContact.name is string && data.emergencyContact.name.size() <= 100
+            && data.emergencyContact.phone is string && data.emergencyContact.phone.size() <= 20
+          ))
+          && (!data.keys().hasAny(['lastUpdated']) || data.lastUpdated is string);
+      }
+
+      // 2. Maintenance Records
+      match /maintenance/{recordId} {
+        allow list: if isOwner(userId);
+        allow get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMaintenanceRecord(incoming()) && isValidId(recordId);
+        allow update: if isOwner(userId) && isValidMaintenanceRecord(incoming())
+          && (incoming().diff(existing()).affectedKeys().hasOnly(['type', 'mileage', 'date', 'cost', 'notes']));
+        allow delete: if isOwner(userId);
+
+        function isValidMaintenanceRecord(data) {
+          return data.keys().hasAll(['type', 'mileage', 'date', 'cost'])
+            && data.type is string && data.type.size() <= 200
+            && data.mileage is number && data.mileage >= 0
+            && data.date is string && data.date.size() <= 20
+            && data.cost is number && data.cost >= 0
+            && (!data.keys().hasAny(['notes']) || (data.notes is string && data.notes.size() <= 2000));
+        }
+      }
+    }
+  }
+}

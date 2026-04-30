@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definition
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Phase 4: Drafting the "Fortress" Rules
+    match /users/{userId} {
+      // Identity Protection: userId must match the authenticated user
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(incoming());
+      allow update: if isOwner(userId)
+        && isValidUserProfile(incoming())
+        && (
+          // Action: Update Stats/Settings
+          incoming().diff(existing()).affectedKeys().hasOnly(['odometer', 'emergencyContact', 'lastUpdated'])
+        );
+
+      function isValidUserProfile(data) {
+        // Strict Key Check on Create and Type Validation
+        return data.keys().hasAll(['odometer'])
+          && data.odometer is number && data.odometer >= 0
+          && (!data.keys().hasAny(['emergencyContact']) || (
+            data.emergencyContact.name is string && data.emergencyContact.name.size() <= 100
+            && data.emergencyContact.phone is string && data.emergencyContact.phone.size() <= 20
+          ))
+          && (!data.keys().hasAny(['lastUpdated']) || (data.lastUpdated is string && data.lastUpdated.size() <= 50));
+      }
+
+      // Maintenance subcollection
+      match /maintenance/{recordId} {
+        // Secure List Queries
+        allow list: if isOwner(userId);
+        allow get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(recordId) && isValidMaintenanceRecord(incoming());
+        allow update: if isOwner(userId)
+          && isValidMaintenanceRecord(incoming())
+          && (
+            // Action: Comprehensive Edit
+            incoming().diff(existing()).affectedKeys().hasOnly(['type', 'mileage', 'date', 'cost', 'notes'])
+          );
+        allow delete: if isOwner(userId);
+
+        function isValidMaintenanceRecord(data) {
+          return data.keys().hasAll(['type', 'mileage', 'date', 'cost'])
+            && data.type is string && data.type.size() <= 200
+            && data.mileage is number && data.mileage >= 0
+            && data.date is string && data.date.size() <= 20
+            && data.cost is number && data.cost >= 0
+            && (!data.keys().hasAny(['notes']) || (data.notes is string && data.notes.size() <= 2000));
+        }
+      }
+
+      // Sessions subcollection
+      match /sessions/{sessionId} {
+        allow list: if isOwner(userId);
+        allow get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(sessionId) && isValidRideSession(incoming());
+        allow delete: if isOwner(userId);
+
+        function isValidRideSession(data) {
+          return data.keys().hasAll(['startTime', 'endTime', 'distance'])
+            && data.startTime is string && data.startTime.size() <= 50
+            && data.endTime is string && data.endTime.size() <= 50
+            && data.distance is number && data.distance >= 0
+            && (!data.keys().hasAny(['startOdo']) || data.startOdo is number)
+            && (!data.keys().hasAny(['endOdo']) || data.endOdo is number)
+            && (!data.keys().hasAny(['date']) || (data.date is string && data.date.size() <= 20));
+        }
+      }
+    }
+  }
+}
